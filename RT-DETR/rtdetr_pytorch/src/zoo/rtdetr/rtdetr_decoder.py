@@ -1,4 +1,3 @@
-
 """by lyuwenyu
 """
 
@@ -264,24 +263,23 @@ class TransformerDecoder(nn.Module):
                            attn_mask, memory_mask, query_pos_embed)
 
             inter_ref_bbox = F.sigmoid(bbox_head[i](output) + inverse_sigmoid(ref_points_detach))
-#abc
+#fixing
             if self.training:
                 dec_out_logits.append(score_head[i](output))
-                
-                #print("score_head[i](output).shape",score_head[i](output).shape)
-                
-                #print("output.shape",output.shape)
+
                 dec_out_ori_logits.append(output)
 
                 if i == 0:
                     dec_out_bboxes.append(inter_ref_bbox)
                 else:
                     dec_out_bboxes.append(F.sigmoid(bbox_head[i](output) + inverse_sigmoid(ref_points)))
-
+                
+                
             elif i == self.eval_idx:
                 dec_out_logits.append(score_head[i](output))
                 dec_out_ori_logits.append(output)
                 dec_out_bboxes.append(inter_ref_bbox)
+                
                 break
 
             ref_points = inter_ref_bbox
@@ -341,8 +339,8 @@ class RTDETRTransformer(nn.Module):
 
         # Transformer module
         decoder_layer = TransformerDecoderLayer(hidden_dim, nhead, dim_feedforward, dropout, activation, num_levels, num_decoder_points)
-        self.decoder = TransformerDecoder(hidden_dim, decoder_layer, num_decoder_layers, eval_idx)
-
+        self.decoder = TransformerDecoder(hidden_dim, decoder_layer, num_decoder_layers, eval_idx)        
+        
         self.num_denoising = num_denoising
         self.label_noise_ratio = label_noise_ratio
         self.box_noise_scale = box_noise_scale
@@ -596,20 +594,36 @@ class RTDETRTransformer(nn.Module):
             dn_out_bboxes, out_bboxes = torch.split(out_bboxes, dn_meta['dn_num_split'], dim=2)
             
             dn_out_ori_logits, out_ori_logits = torch.split(out_ori_logits, dn_meta['dn_num_split'], dim=2)
-            
-            dn_out_logits, out_logits = torch.split(out_logits, dn_meta['dn_num_split'], dim=2)
 
-        out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1],'origin_logits':out_ori_logits[-1]}
+                        
+            dn_out_logits, out_logits = torch.split(out_logits, dn_meta['dn_num_split'], dim=2)
+        
+        #fixing
+
+        
+        #out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1],'origin_logits':out_ori_logits[-1]}
         #print("out['origin_logits'].shape",out['origin_logits'].shape)
         
         
+        if self.training:
+        
+            out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1]
+                   ,'origin_logits_l6':out_ori_logits[-1]
+                   ,'origin_logits_l5':out_ori_logits[-2]
+                   ,'origin_logits_l4':out_ori_logits[-3]
+                  }
+        else:
+            out = {'pred_logits': out_logits[-1], 'pred_boxes': out_bboxes[-1]
+                   ,'origin_logits_l6':out_ori_logits[-1]
+                   }
+        
         if self.training and self.aux_loss:
-            out['aux_outputs'] = self._set_aux_loss(out_logits[:-1], out_bboxes[:-1],out_ori_logits[:-1])
+            out['aux_outputs'] = self._set_aux_loss(out_logits[:-1], out_bboxes[:-1], out_ori_logits[:-1] , out_ori_logits[:-1], out_ori_logits[:-1])
             
-            out['aux_outputs'].extend(self._set_aux_loss([enc_topk_logits], [enc_topk_bboxes],[ori_enc_topk_logits]))
+            out['aux_outputs'].extend(self._set_aux_loss([enc_topk_logits], [enc_topk_bboxes], [ori_enc_topk_logits], [ori_enc_topk_logits], [ori_enc_topk_logits]))
             
             if self.training and dn_meta is not None:
-                out['dn_aux_outputs'] = self._set_aux_loss(dn_out_logits, dn_out_bboxes,dn_out_ori_logits)
+                out['dn_aux_outputs'] = self._set_aux_loss(dn_out_logits, dn_out_bboxes, dn_out_ori_logits, dn_out_ori_logits, dn_out_ori_logits)
                 out['dn_meta'] = dn_meta
 
         #print("len of out of decoder",len(out))
@@ -629,9 +643,9 @@ class RTDETRTransformer(nn.Module):
 #out dn_meta
 
     @torch.jit.unused
-    def _set_aux_loss(self, outputs_class, outputs_coord,output_ori_logit):
+    def _set_aux_loss(self, outputs_class, outputs_coord, output_ori_logit_l6, output_ori_logit_l5, output_ori_logit_l4):
         # this is a workaround to make torchscript happy, as torchscript
         # doesn't support dictionary with non-homogeneous values, such
         # as a dict having both a Tensor and a list.
-        return [{'pred_logits': a, 'pred_boxes': b, 'origin_logits': c}
-                for a, b, c in zip(outputs_class, outputs_coord,output_ori_logit)]
+        return [{'pred_logits': a, 'pred_boxes': b, 'origin_logits_l6': c, 'origin_logits_l5': d, 'origin_logits_l4': e}
+                for a, b, c, d, e in zip(outputs_class, outputs_coord, output_ori_logit_l6, output_ori_logit_l5, output_ori_logit_l4)]
